@@ -1,0 +1,73 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum BookingStatus {
+  BOOKED
+  CANCELLED
+}
+
+model Admin {
+  id           Int      @id @default(autoincrement())
+  username     String   @unique
+  passwordHash String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model BookingSetting {
+  id            Int      @id @default(1)
+  openHour      Int
+  closeHour     Int
+  slotDuration  Int
+  peakStartHour Int
+  lowHourPrice  Int
+  peakHourPrice Int
+  updatedAt     DateTime @updatedAt
+}
+
+model Court {
+  id        Int           @id @default(autoincrement())
+  name      String
+  isActive  Boolean       @default(true)
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  bookings  BookingCourt[]
+}
+
+model Booking {
+  id            Int           @id @default(autoincrement())
+  bookingCode   String        @unique
+  fullName      String
+  phoneNumber   String
+  date          String
+  dateDisplay   String
+  timeSlot      String
+  timeSlotLabel String
+  totalPrice    Int
+  status        BookingStatus @default(BOOKED)
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  cancelledAt   DateTime?
+  courts        BookingCourt[]
+
+  @@index([date, timeSlot])
+  @@index([status])
+}
+
+model BookingCourt {
+  id        Int      @id @default(autoincrement())
+  bookingId Int
+  courtId   Int
+  createdAt DateTime @default(now())
+
+  booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  court   Court   @relation(fields: [courtId], references: [id], onDelete: Restrict)
+
+  @@unique([bookingId, courtId])
+  @@index([courtId])
+}
