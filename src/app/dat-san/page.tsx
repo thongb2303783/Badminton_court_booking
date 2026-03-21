@@ -45,6 +45,11 @@ function toDateValue(date: Date): string {
   return `${yyyy}-${mm}-${dd}`
 }
 
+function normalizeDateInput(value: string, todayKey: string): string {
+  if (!value) return todayKey
+  return value < todayKey ? todayKey : value
+}
+
 function getHourlyRateByHour(hour: number, settings: BookingSettings) {
   return hour >= settings.peakStartHour ? settings.peakHourPrice : settings.lowHourPrice
 }
@@ -202,7 +207,7 @@ export default function BookingPage() {
                 min={minDate}
                 value={selectedDate}
                 onChange={(e) => {
-                  setSelectedDate(e.target.value)
+                  setSelectedDate(normalizeDateInput(e.target.value, minDate))
                   setSelectedCourts([])
                 }}
               />

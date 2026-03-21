@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { cookies } from "next/headers"
+import { Prisma } from "@prisma/client"
 import { db } from "@/lib/db"
 
 type BookingDTO = {
@@ -17,6 +18,7 @@ type BookingDTO = {
 }
 
 const ADMIN_SESSION_COOKIE = "admin_session"
+const MAX_BOOKING_CREATE_RETRIES = 3
 
 async function isAdminRequest() {
   const cookieStore = await cookies()
@@ -25,6 +27,21 @@ async function isAdminRequest() {
 
   const admin = await db.admin.findUnique({ where: { username } })
   return Boolean(admin)
+}
+
+function getTodayKey(): string {
+  const now = new Date()
+  const yyyy = now.getFullYear()
+  const mm = String(now.getMonth() + 1).padStart(2, "0")
+  const dd = String(now.getDate()).padStart(2, "0")
+  return `${yyyy}-${mm}-${dd}`
+}
+
+function isRetryableTransactionError(error: unknown): boolean {
+  if (error instanceof Prisma.PrismaClientKnownRequestError) {
+    return error.code === "P2034"
+  }
+  return false
 }
 
 function toDTO(item: {
@@ -115,48 +132,76 @@ export async function POST(request: Request) {
       return NextResponse.json({ message: "Dữ liệu đặt sân không hợp lệ." }, { status: 400 })
     }
 
-    const activeConflictCount = await db.bookingCourt.count({
-      where: {
-        courtId: { in: courts },
-        booking: {
-          date,
-          timeSlot,
-          status: "BOOKED",
-        },
-      },
-    })
-
-    if (activeConflictCount > 0) {
-      return NextResponse.json({ message: "Một hoặc nhiều sân đã được đặt." }, { status: 409 })
+    if (date < getTodayKey()) {
+      return NextResponse.json({ message: "Chỉ có thể đặt sân từ hôm nay trở đi." }, { status: 400 })
     }
 
-    const bookingCode = `BK-${Date.now()}-${Math.floor(Math.random() * 1000)}`
+    for (let attempt = 1; attempt <= MAX_BOOKING_CREATE_RETRIES; attempt += 1) {
+      try {
+        const created = await db.$transaction(
+          async (tx) => {
+            const activeConflictCount = await tx.bookingCourt.count({
+              where: {
+                courtId: { in: courts },
+                booking: {
+                  date,
+                  timeSlot,
+                  status: "BOOKED",
+                },
+              },
+            })
 
-    const created = await db.booking.create({
-      data: {
-        bookingCode,
-        fullName,
-        phoneNumber,
-        date,
-        dateDisplay,
-        timeSlot,
-        timeSlotLabel,
-        totalPrice,
-        status: "BOOKED",
-        courts: {
-          create: courts.map((courtId) => ({ courtId })),
-        },
-      },
-      include: {
-        courts: {
-          select: {
-            courtId: true,
+            if (activeConflictCount > 0) {
+              throw new Error("BOOKING_CONFLICT")
+            }
+
+            const bookingCode = `BK-${Date.now()}-${Math.floor(Math.random() * 1000)}`
+
+            return tx.booking.create({
+              data: {
+                bookingCode,
+                fullName,
+                phoneNumber,
+                date,
+                dateDisplay,
+                timeSlot,
+                timeSlotLabel,
+                totalPrice,
+                status: "BOOKED",
+                courts: {
+                  create: courts.map((courtId) => ({ courtId })),
+                },
+              },
+              include: {
+                courts: {
+                  select: {
+                    courtId: true,
+                  },
+                },
+              },
+            })
           },
-        },
-      },
-    })
+          {
+            isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+          },
+        )
 
-    return NextResponse.json(toDTO(created))
+        return NextResponse.json(toDTO(created))
+      } catch (error) {
+        if (error instanceof Error && error.message === "BOOKING_CONFLICT") {
+          return NextResponse.json({ message: "Một hoặc nhiều sân đã được đặt." }, { status: 409 })
+        }
+
+        const shouldRetry = isRetryableTransactionError(error) && attempt < MAX_BOOKING_CREATE_RETRIES
+        if (shouldRetry) {
+          continue
+        }
+
+        throw error
+      }
+    }
+
+    return NextResponse.json({ message: "Không thể tạo đơn đặt sân." }, { status: 500 })
   } catch {
     return NextResponse.json({ message: "Không thể tạo đơn đặt sân." }, { status: 500 })
   }

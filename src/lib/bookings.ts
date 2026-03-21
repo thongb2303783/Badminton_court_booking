@@ -14,6 +14,16 @@ export type BookingRecord = {
   createdAt: string
 }
 
+export class BookingApiError extends Error {
+  status: number
+
+  constructor(message: string, status: number) {
+    super(message)
+    this.name = "BookingApiError"
+    this.status = status
+  }
+}
+
 export async function loadBookings(filters?: { date?: string; timeSlot?: string }): Promise<BookingRecord[]> {
   const query = new URLSearchParams()
   if (filters?.date) query.set("date", filters.date)
@@ -52,7 +62,17 @@ export async function createBooking(
   })
 
   if (!res.ok) {
-    throw new Error("Không thể tạo đơn đặt sân.")
+    let message = "Không thể tạo đơn đặt sân."
+    try {
+      const data = (await res.json()) as { message?: string }
+      if (data?.message) {
+        message = data.message
+      }
+    } catch {
+      // Keep fallback message when response body is not JSON.
+    }
+
+    throw new BookingApiError(message, res.status)
   }
 
   return (await res.json()) as BookingRecord

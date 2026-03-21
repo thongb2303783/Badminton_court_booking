@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label"
 import { Separator } from "@/components/ui/separator"
 import { CalendarDays, Clock, MapPin, User, Phone, CheckCircle2, ArrowLeft } from "lucide-react"
 import Link from "next/link"
-import { createBooking } from "@/lib/bookings"
+import { BookingApiError, createBooking } from "@/lib/bookings"
 
 interface BookingData {
   date: string
@@ -83,8 +83,18 @@ export default function PaymentPage() {
           courts: bookingData.courts,
           totalPrice: bookingData.totalPrice,
         })
-      } catch {
+      } catch (error) {
         setIsSubmitting(false)
+        if (error instanceof BookingApiError) {
+          if (error.status === 409) {
+            setSubmitError(error.message)
+            return
+          }
+
+          setSubmitError(error.message || "Hệ thống đang bận. Vui lòng thử lại.")
+          return
+        }
+
         setSubmitError("Sân vừa được đặt bởi người khác hoặc hệ thống lỗi. Vui lòng thử lại.")
         return
       }
